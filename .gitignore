@@ -1,0 +1,5 @@
+/.idea
+/*.env
+/IMG_test
+/images/*.jpg
+/yolov5
