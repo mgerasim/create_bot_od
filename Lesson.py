@@ -2,7 +2,10 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters
 from dotenv import load_dotenv
 import os
 import shutil
-from TerraYolo.TerraYolo import TerraYoloV5             # загружаем фреймворк TerraYolo
+import torch
+from PIL import Image
+import cv2
+import numpy as np
 
 # возьмем переменные окружения из .env
 load_dotenv()
@@ -10,10 +13,9 @@ load_dotenv()
 # загружаем токен бота
 TOKEN =  os.environ.get("TOKEN") # ВАЖНО !!!!!
 
-# инициализируем класс YOLO
-WORK_DIR = r'F:\Create_bot_OD'
-os.makedirs(WORK_DIR, exist_ok=True)
-yolov5 = TerraYoloV5(work_dir=WORK_DIR)
+# Загрузка модели YOLOv5
+model = torch.hub.load('ultralytics/yolov5', 'yolov5s')
+
 
 
 # функция команды /start
@@ -28,16 +30,12 @@ async def help(update, context):
 
 # функция обработки изображения
 async def detection(update, context):
-    # удаляем папку images с предыдущим загруженным изображением и папку runs с результатом предыдущего распознавания
-    try:
-        shutil.rmtree('images') 
-        shutil.rmtree(f'{WORK_DIR}/yolov5/runs') 
-    except:
-        pass
+
 
     my_message = await update.message.reply_text('Мы получили от тебя фотографию. Идет распознавание объектов...')
     # получение файла из сообщения
     new_file = await update.message.photo[-1].get_file()
+
 
     # имя файла на сервере
     os.makedirs('images', exist_ok=True)
@@ -46,17 +44,33 @@ async def detection(update, context):
     # скачиваем файл с сервера Telegram в папку images
     await new_file.download_to_drive(image_path)
 
-    # создаем словарь с параметрами
-    test_dict = dict()
-    test_dict['weights'] = 'yolov5x.pt'     # Самые сильные веса yolov5x.pt, вы также можете загрузить версии: yolov5n.pt, yolov5s.pt, yolov5m.pt, yolov5l.pt (в порядке возрастания)
+    # Путь к входному изображению
+    input_image_path = image_path
 
-    test_dict['source'] = 'images'          # папка, в которую загружаются присланные в бота изображения
-    # test_dict['conf'] = 0.85              # порог распознавания
-    # test_dict['classes'] = '50 39'        # классы, которые будут распознаны
+    # Путь для сохранения выходного изображения
+    output_image_path = 'IMG_test/город3.jpg'
 
+    # Загрузка изображения
+    image = Image.open(input_image_path)
 
-    # вызов функции detect из класса TerraYolo)
-    yolov5.run(test_dict, exp_type='test') 
+    # Выполнение обнаружения
+    results = model(image)
+
+    # Преобразование изображения в формат OpenCV
+    img = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
+
+    # Перебор обнаруженных объектов
+    for det in results.xyxy[0]:
+        x1, y1, x2, y2, conf, cls = det
+        if model.names[int(cls)] == 'person' and conf > 0.5:  # Проверка, что объект - человек и уверенность > 50%
+            # Рисование прямоугольника вокруг человека
+            cv2.rectangle(img, (int(x1), int(y1)), (int(x2), int(y2)), (0, 255, 0), 2)
+
+    # Сохранение результата
+    cv2.imwrite(output_image_path, img)
+
+    print(f"Изображение с обнаруженными людьми сохранено в {output_image_path}")
+
 
     # удаляем предыдущее сообщение от бота
     await context.bot.deleteMessage(message_id = my_message.message_id, # если не указать message_id, то удаляется последнее сообщение
@@ -64,7 +78,7 @@ async def detection(update, context):
 
     # отправляем пользователю результат
     await update.message.reply_text('Распознавание объектов завершено') # отправляем пользователю результат 
-    await update.message.reply_photo(f"{WORK_DIR}/yolov5/runs/detect/exp/{image_name}") # отправляем пользователю результат изображение
+    await update.message.reply_photo(output_image_path) # отправляем пользователю результат изображение
 
 
 
